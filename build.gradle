@@ -69,7 +69,6 @@ task createChecksum(type: Checksum) {
     algorithm = Checksum.Algorithm.SHA256
 }
 
-/**
 task homebrew(type: Copy) {
     project.afterEvaluate {
             println(createChecksum.outputs.files[0])
@@ -83,7 +82,6 @@ task homebrew(type: Copy) {
             )
         }
 }
-**/
 
 githubRelease {
     // currently does not work as project.version not set.
@@ -113,8 +111,8 @@ versioner {
 
 
 createChecksum.dependsOn(assembleDist)
-//homebrew.dependsOn(createChecksum,distZip)
-//build.dependsOn(homebrew)
+homebrew.dependsOn(createChecksum,distZip)
+build.dependsOn(homebrew)
 build.dependsOn(createChecksum)
 group = "dk.xam.jbang"
 sourceCompatibility = '11'
