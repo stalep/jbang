@@ -14,8 +14,6 @@ import java.nio.file.Files;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import picocli.CommandLine;
-
 public class TestMain {
 
 	public static final String EXAMPLES_FOLDER = "examples";
@@ -32,7 +30,7 @@ public class TestMain {
 
 		Main main = new Main();
 		var arg = new File(examplesTestFolder, "helloworld.java").getAbsolutePath();
-		new CommandLine(main).parseArgs(arg);
+		// new CommandLine(main).parseArgs(arg);
 
 		String result = main.generateCommandLine(new Script(new File("helloworld.java"), "")).toString();
 
@@ -46,7 +44,7 @@ public class TestMain {
 
 		Main main = new Main();
 		var arg = new File(examplesTestFolder, "helloworld.jsh").getAbsolutePath();
-		new CommandLine(main).parseArgs(arg);
+		// new CommandLine(main).parseArgs(arg);
 
 		String result = main.generateCommandLine(new Script(new File("helloworld.jsh"), "")).toString();
 
@@ -61,7 +59,8 @@ public class TestMain {
 
 		Main main = new Main();
 		var arg = new File(examplesTestFolder, "helloworld.java").getAbsolutePath();
-		new CommandLine(main).parseArgs("--debug", arg);
+		// new CommandLine(main).parseArgs("--debug", arg);
+		main.debug = true;
 
 		String result = main.generateCommandLine(new Script(new File("helloworld.java"), "")).toString();
 
@@ -78,7 +77,7 @@ public class TestMain {
 
 		Main main = new Main();
 		var arg = new File(examplesTestFolder, "classpath_example.java").getAbsolutePath();
-		new CommandLine(main).parseArgs(arg);
+		// new CommandLine(main).parseArgs(arg);
 
 		String result = main.generateCommandLine(new Script(new File(arg))).toString();
 
@@ -103,7 +102,7 @@ public class TestMain {
 				containsString("Logger.getLogger(classpath_example.class);"));
 
 		Main main = new Main();
-		new CommandLine(main).parseArgs(url.toString());
+		// new CommandLine(main).parseArgs(url.toString());
 
 		String s = main.generateCommandLine(Main.prepareScript(url.toString()));
 

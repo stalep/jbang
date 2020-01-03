@@ -1,8 +1,6 @@
 package dk.xam.jbang;
 
-import static java.lang.System.err;
 import static java.lang.System.out;
-import static picocli.CommandLine.*;
 
 import java.io.*;
 import java.net.URL;
@@ -12,58 +10,57 @@ import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
+
+import org.aesh.AeshRuntimeRunner;
+import org.aesh.command.Command;
+import org.aesh.command.CommandDefinition;
+import org.aesh.command.CommandResult;
+import org.aesh.command.invocation.CommandInvocation;
+import org.aesh.command.option.Argument;
+import org.aesh.command.option.Option;
+import org.aesh.command.shell.Shell;
+import org.aesh.io.Resource;
 
 import io.quarkus.qute.Engine;
 import io.quarkus.qute.Template;
 import io.quarkus.qute.TemplateLocator;
 import io.quarkus.qute.Variant;
-import picocli.CommandLine;
-import picocli.CommandLine.Model.ArgSpec;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Model.OptionSpec;
 
-@Command(name = "jbang", footer = "\nCopyright: 2020 Max Rydahl Andersen, License: MIT\nWebsite: https://github.com/maxandersen/jbang", mixinStandardHelpOptions = false, versionProvider = VersionProvider.class, description = "Compiles and runs .java/.jsh scripts.")
-public class Main implements Callable<Integer> {
+@CommandDefinition(name = "jbang",
+		// footer = "\nCopyright: 2020 Max Rydahl Andersen, License: MIT\nWebsite:
+		// https://github.com/maxandersen/jbang", mixinStandardHelpOptions = false,
+		// versionProvider = VersionProvider.class,
+		generateHelp = true, description = "Compiles and runs .java/.jsh scripts.")
+public class Main implements Command<CommandInvocation> {
 
-	@Spec
-	CommandSpec spec;
+	@Option(name = "debug-port", defaultValue = {
+			"4004" }, description = "Launch with java debug enabled on specified port(default: ${FALLBACK-VALUE}) ")
+	int debugPort;
 
-	@Option(names = { "-d",
-			"--debug" }, fallbackValue = "4004", parameterConsumer = IntFallbackConsumer.class, description = "Launch with java debug enabled on specified port(default: ${FALLBACK-VALUE}) ")
-	int debugPort = -1;
-	private Script script;
+	@Option(name = "debug", shortName = 'd', hasValue = false)
+	boolean debug;
+
+	Script script;
 
 	boolean debug() {
-		return debugPort >= 0;
+		return debug;
 	}
 
-	@Option(names = { "-e", "--edit" }, description = "Edit script by setting up temporary project.")
+	@Option(shortName = 'e', description = "Edit script by setting up temporary project.")
 	boolean edit;
 
-	@Option(names = { "-h", "--help" }, usageHelp = true, description = "Display help/info")
-	boolean helpRequested;
-
-	@Option(names = { "--version" }, versionHelp = true, arity = "0", description = "Display version info")
+	@Option(name = "version", hasValue = false, description = "Display version info")
 	boolean versionRequested;
 
-	@Parameters(index = "0", description = "A file with java code or if named .jsh will be run with jshell")
-	String scriptOrFile;
+	@Option(name = "params", description = "Parameters to pass on to the script, use \" or \' to start and stop a string block if you need to add multiple parameters")
+	String userParams;
 
-	@Parameters(index = "1..*", arity = "0..*", description = "Parameters to pass on to the script")
-	List<String> userParams = new ArrayList<String>();
-
-	@Option(names = { "--init" }, description = "Init script with a java class useful for scripting.")
+	@Option(name = "init", hasValue = false, description = "Init script with a java class useful for scripting.")
 	boolean initScript;
 
-	void info(String msg) {
-		spec.commandLine().getErr().println(msg);
-	}
-
-	void warn(String msg) {
-		info("[jbang] [WARNING] " + msg);
-	}
+	@Argument(description = "A file with java code or if named .jsh will be run with jshell")
+	Resource scriptOrFile;
 
 	/*
 	 * void quit(int status) { out.println(status == 0 ? "true" : "false"); throw
@@ -74,61 +71,58 @@ public class Main implements Callable<Integer> {
 	 * void quit(String output) { out.println("echo " + output); throw new
 	 * ExitException(0); }
 	 */
+	private Shell shell;
 
 	public static void main(String... args) throws FileNotFoundException {
-		int exitcode = getCommandLine().execute(args);
-		System.exit(exitcode);
-	}
-
-	static CommandLine getCommandLine() {
-		return getCommandLine(new PrintWriter(err), new PrintWriter(err));
-	}
-
-	static CommandLine getCommandLine(PrintWriter localout, PrintWriter localerr) {
-		return new CommandLine(new Main()).setExitCodeExceptionMapper(new VersionProvider()).setStopAtPositional(true)
-				.setOut(new PrintWriter(localout, true)).setErr(new PrintWriter(localerr, true));
+		AeshRuntimeRunner.builder().interactive(true).command(Main.class).args(args).execute();
 	}
 
 	@Override
-	public Integer call() throws IOException {
+	public CommandResult execute(CommandInvocation invocation) {
 
-		if (helpRequested) {
-			spec.commandLine().usage(err);
-			return 0; // quit(0);
-		} else if (versionRequested) {
-			spec.commandLine().printVersionHelp(err);
-			return 0; // quit(0);
+		this.shell = invocation.getShell();
+
+		if (versionRequested) {
+			invocation.println(dk.xam.jbang.BuildConfig.VERSION);
+			return CommandResult.SUCCESS;
 		}
 
 		if (initScript) {
-			var f = new File(scriptOrFile);
+			var f = new File(scriptOrFile.getAbsolutePath());
 			if (f.exists()) {
-				warn("File " + f + " already exists. Will not initialize.");
+				invocation.println("File " + f + " already exists. Will not initialize.");
 			} else {
 				// Use try-with-resource to get auto-closeable writer instance
 				try (BufferedWriter writer = Files.newBufferedWriter(f.toPath())) {
 					String result = renderInitClass(f);
 					writer.write(result);
+				} catch (IOException e) {
+					invocation.println(e.getMessage());
 				}
 			}
 		} else { // no point in editing nor running something we just inited.
-			if (edit) {
-				script = prepareScript(scriptOrFile);
-				File project = createProject(script, userParams, script.collectDependencies());
-				// err.println(project.getAbsolutePath());
-				out.println("echo " + project.getAbsolutePath()); // quit(project.getAbsolutePath());
-				return 0;
-			}
-			if (!initScript) {
-				script = prepareScript(scriptOrFile);
-				String cmdline = generateCommandLine(script);
-				out.println(cmdline);
+			try {
+
+				if (edit) {
+					script = prepareScript(scriptOrFile.getAbsolutePath());
+					File project = createProject(script, userParams, script.collectDependencies());
+					// err.println(project.getAbsolutePath());
+					out.println("echo " + project.getAbsolutePath()); // quit(project.getAbsolutePath());
+					return CommandResult.SUCCESS;
+				}
+				if (!initScript) {
+					script = prepareScript(scriptOrFile.getAbsolutePath());
+					String cmdline = generateCommandLine(script);
+					out.println(cmdline);
+				}
+			} catch (IOException ioe) {
+				invocation.println(ioe.getMessage());
 			}
 		}
-		return 0;
+		return CommandResult.SUCCESS;
 	}
 
-	File createProject(Script script, List<String> userParams, List<String> collectDependencies) throws IOException {
+	File createProject(Script script, String userParams, List<String> collectDependencies) throws IOException {
 
 		Engine engine = Engine.builder().addDefaults().addLocator(this::locate).build();
 
@@ -251,7 +245,10 @@ public class Main implements Callable<Integer> {
 				optionalArgs.add("--class-path " + classpath);
 			}
 			if (debug()) {
-				info("debug not possible when running via jshell.");
+				if (shell != null)
+					shell.writeln("debug not possible when running via jshell.");
+				else
+					System.err.println("debug not possible when running via jshell.");
 			}
 
 		} else {
@@ -268,7 +265,7 @@ public class Main implements Callable<Integer> {
 		fullArgs.add(javacmd);
 		fullArgs.addAll(optionalArgs);
 		fullArgs.add(script.backingFile.toString());
-		fullArgs.addAll(userParams);
+		fullArgs.add(userParams);
 
 		return fullArgs.stream().collect(Collectors.joining(" "));
 	}
@@ -404,23 +401,4 @@ public class Main implements Callable<Integer> {
 		}
 	}
 
-	static class IntFallbackConsumer implements IParameterConsumer {
-		@Override
-		public void consumeParameters(Stack<String> args, ArgSpec argSpec, CommandSpec commandSpec) {
-			String arg = args.pop();
-			try {
-				int port = Integer.parseInt(arg);
-				argSpec.setValue(port);
-			} catch (Exception ex) {
-				String fallbackValue = (argSpec.isOption()) ? ((OptionSpec) argSpec).fallbackValue() : null;
-				try {
-					int fallbackPort = Integer.parseInt(fallbackValue);
-					argSpec.setValue(fallbackPort);
-				} catch (Exception badFallbackValue) {
-					throw new InitializationException("FallbackValue for --debug must be an int", badFallbackValue);
-				}
-				args.push(arg); // put it back
-			}
-		}
-	}
 }
